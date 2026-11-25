@@ -17559,8 +17559,12 @@ async function pgAdmin(app) {
     <label style="margin-top:8px"><input type="checkbox" id="auto" ${s.auto ? 'checked' : ''} style="width:auto"> Автозапуск матчей по расписанию</label>
     <label style="margin-top:6px"><input type="checkbox" id="tdef" ${s.techDefeat ? 'checked' : ''} style="width:auto"> Авто-ТН (техническое поражение 0:3 при неподанном составе, неполном штабе или неоформленном выезде + штраф КДК за неявку)</label>
     ${(() => {
-      const tdComps = (ov.comps && ov.comps.length ? ov.comps : (S.st?.comps || []).filter(c => c && c.id && c.id !== 'friendly_match' && c.type !== 'friendly' && c.type !== 'abroad'));
-      const selComps = Array.isArray(s.techDefeatComps) ? s.techDefeatComps : tdComps.map(c => c.id);
+      const tdComps = (ov.comps && ov.comps.length ? ov.comps : (S.st?.comps || []).filter(c => c && c.id && c.id !== 'friendly_match' && c.type !== 'friendly' && c.type !== 'abroad').flatMap(c => c.id === 'cup' ? [
+        { id: 'cup_rpl', name: 'Кубок России · Путь РПЛ', level: 'Группы, плей-офф Пути РПЛ и Суперфинал' },
+        { id: 'cup_regions', name: 'Кубок России · Путь регионов', level: 'Отбор (Р1–Р6) и плей-офф Пути регионов' }
+      ] : [c]));
+      const rawSel = Array.isArray(s.techDefeatComps) ? s.techDefeatComps : tdComps.map(c => c.id);
+      const selComps = rawSel.flatMap(id => id === 'cup' ? ['cup_rpl', 'cup_regions'] : [id]);
       return `<div id="tdef_comps_box" style="margin:10px 0 4px 22px;padding:12px 14px;border:1px solid var(--bd);border-radius:10px;background:var(--bg2,#f8fafc);${s.techDefeat ? '' : 'opacity:0.55;'}">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">
           <div>
@@ -17569,7 +17573,7 @@ async function pgAdmin(app) {
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button type="button" class="btn alt sm" id="tdef_all">Выбрать все</button>
-            <button type="button" class="btn alt sm" id="tdef_pro">РПЛ + Кубок + ФНЛ</button>
+            <button type="button" class="btn alt sm" id="tdef_pro">РПЛ + Кубок (Путь РПЛ) + ФНЛ</button>
             <button type="button" class="btn alt sm" id="tdef_none">Снять все</button>
           </div>
         </div>
@@ -17703,7 +17707,7 @@ async function pgAdmin(app) {
     if ($('#tdef_all')) $('#tdef_all').onclick = () => ab.querySelectorAll('.tdef-comp').forEach(x => { x.checked = true; });
     if ($('#tdef_none')) $('#tdef_none').onclick = () => ab.querySelectorAll('.tdef-comp').forEach(x => { x.checked = false; });
     if ($('#tdef_pro')) $('#tdef_pro').onclick = () => {
-      const pro = new Set(['rpl', 'supercup', 'cup', 'playoff', 'fnl']);
+      const pro = new Set(['rpl', 'supercup', 'cup_rpl', 'playoff', 'fnl']);
       ab.querySelectorAll('.tdef-comp').forEach(x => { x.checked = pro.has(x.value); });
     };
 

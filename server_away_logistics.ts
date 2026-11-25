@@ -1227,12 +1227,18 @@ export function getClubAwayFixturesSummary(ctx: AwayLogisticsServerContext, tid:
       const key = `${f.id}:${tid}`;
       const rec: AwayLogisticsRecord | null = db.awayLogistics[key] || null;
       const oppId = f.home === tid ? f.away : f.home;
+      const compRaw = String(f.comp || "");
+      const compStageLow = String(f.cupStage || "").toLowerCase();
+      const compLblLow = String(f.label || "").toLowerCase();
+      const tdKey = compRaw === "cup"
+        ? ((f.cupPath === "rpl_group" || f.cupPath === "rpl_playoff" || f.cupPath === "superfinal" || compStageLow === "superfinal" || compStageLow.startsWith("rpl_") || compLblLow.includes("путь рпл") || compLblLow.includes("пути рпл") || (!f.cupPath && !f.cupStage && Number(f.round) >= 1 && Number(f.round) <= 6)) ? "cup_rpl" : "cup_regions")
+        : (compRaw === "playoff_rpl_fnl" ? "playoff" : compRaw);
       const tdForComp =
         db.settings?.techDefeat === true &&
-        String(f.comp || "") !== "friendly_match" &&
+        compRaw !== "friendly_match" &&
         (!Array.isArray(db.settings?.techDefeatComps) ||
-          db.settings.techDefeatComps.includes(String(f.comp || "")) ||
-          (f.comp === "playoff_rpl_fnl" && db.settings.techDefeatComps.includes("playoff")));
+          db.settings.techDefeatComps.includes(tdKey) ||
+          (compRaw === "cup" && db.settings.techDefeatComps.includes("cup")));
       return {
         fixtureId: f.id,
         role: geo.role,

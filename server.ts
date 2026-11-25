@@ -6818,7 +6818,7 @@ function seed() {
       chunks: 2,
       auto: true,
       techDefeat: false,
-      techDefeatComps: ["rpl", "supercup", "cup", "playoff", "fnl", "2la_gold", "2la_silver", "2lb_1", "2lb_2", "2lb_3", "2lb_4", "media", "media_div2", "media_cup"],
+      techDefeatComps: ["rpl", "supercup", "cup_rpl", "cup_regions", "playoff", "fnl", "2la_gold", "2la_silver", "2lb_1", "2lb_2", "2lb_3", "2lb_4", "media", "media_div2", "media_cup"],
       squadMax: 28,
       grounding: false,
       tgToken: "",
@@ -7911,6 +7911,13 @@ function load() {
   }
   if (!Array.isArray(db.settings.techDefeatComps)) {
     db.settings.techDefeatComps = def.settings.techDefeatComps.slice();
+  } else if (db.settings.techDefeatComps.includes("cup")) {
+    const expanded = [];
+    for (const cid of db.settings.techDefeatComps) {
+      if (cid === "cup") expanded.push("cup_rpl", "cup_regions");
+      else expanded.push(cid);
+    }
+    db.settings.techDefeatComps = [...new Set(expanded)];
   }
   if (db.settings.squadMax === 25) db.settings.squadMax = 28;
   if (!db.settings.transferWindow || typeof db.settings.transferWindow !== "object") {
@@ -14330,21 +14337,55 @@ function hasStaffRole(tid, role) {
   return role === "head" && !!(db.coaches && !Array.isArray(db.coaches) && db.coaches[tid]);
 }
 function getOfficialTechDefeatComps() {
-  const list = (Array.isArray(db?.comps) && db.comps.length ? db.comps : COMPS)
-    .filter((c) => c && c.id && c.id !== FRIENDLY_COMP && c.type !== "friendly" && c.type !== "abroad")
-    .map((c) => ({ id: String(c.id), name: String(c.name || c.id), type: String(c.type || "league"), level: String(c.level || "") }));
-  return list;
+  const src = (Array.isArray(db?.comps) && db.comps.length ? db.comps : COMPS)
+    .filter((c) => c && c.id && c.id !== FRIENDLY_COMP && c.type !== "friendly" && c.type !== "abroad");
+  const out: Array<{ id: string; name: string; type: string; level: string }> = [];
+  for (const c of src) {
+    if (c.id === "cup") {
+      out.push({ id: "cup_rpl", name: "Кубок России · Путь РПЛ", type: "cup", level: "Группы, плей-офф Пути РПЛ и Суперфинал" });
+      out.push({ id: "cup_regions", name: "Кубок России · Путь регионов", type: "cup", level: "Отбор (Р1–Р6) и плей-офф Пути регионов" });
+    } else {
+      out.push({ id: String(c.id), name: String(c.name || c.id), type: String(c.type || "league"), level: String(c.level || "") });
+    }
+  }
+  return out;
 }
 function getOfficialTechDefeatCompIds() {
   return getOfficialTechDefeatComps().map((c) => c.id);
 }
-function isTechDefeatEnabledForComp(compId?: string | null) {
+function normalizeTechDefeatCompsList(rawList?: any) {
+  if (!Array.isArray(rawList)) return getOfficialTechDefeatCompIds();
+  const out: string[] = [];
+  for (const x of rawList) {
+    const id = String(x || "").trim();
+    if (!id) continue;
+    if (id === "cup") out.push("cup_rpl", "cup_regions");
+    else out.push(id);
+  }
+  return [...new Set(out)];
+}
+function resolveTechDefeatCompKey(f: any) {
+  const raw = String(f?.comp || "").trim();
+  if (!raw) return "";
+  if (raw === "cup") {
+    if (isCupRplPath(f) || f?.cupPath === "superfinal" || f?.cupStage === "superfinal") return "cup_rpl";
+    return "cup_regions";
+  }
+  return raw === "playoff_rpl_fnl" ? "playoff" : raw;
+}
+function isTechDefeatEnabledForFixture(f: any) {
   if (db?.settings?.techDefeat !== true) return false;
-  const raw = String(compId || "").trim();
+  const raw = String(f?.comp || "").trim();
   if (!raw || raw === FRIENDLY_COMP || raw === "friendly" || raw === "europe" || raw === "national") return false;
-  const norm = raw === "playoff_rpl_fnl" ? "playoff" : raw;
   if (!Array.isArray(db.settings.techDefeatComps)) return true;
-  return db.settings.techDefeatComps.includes(norm) || db.settings.techDefeatComps.includes(raw);
+  const key = resolveTechDefeatCompKey(f);
+  if (raw === "cup") {
+    return db.settings.techDefeatComps.includes(key) || db.settings.techDefeatComps.includes("cup");
+  }
+  return db.settings.techDefeatComps.includes(key) || db.settings.techDefeatComps.includes(raw);
+}
+function isTechDefeatEnabledForComp(compId?: string | null) {
+  return isTechDefeatEnabledForFixture({ comp: compId });
 }
 function techProblems(f, tid, side?: "home" | "away") {
   const out = [];
@@ -14427,7 +14468,7 @@ function enqueue(id, force = false, manual = true) {
   if (!f || f.status !== "scheduled") return;
   if (isOwnedByOtherInstance(f)) return;
   if (queue.some((j) => j.id === id)) return;
-  if (!force && isTechDefeatEnabledForComp(f.comp)) {
+  if (!force && isTechDefeatEnabledForFixture(f)) {
     if (manual || Date.now() >= realAt(f).getTime()) {
       const pr = { home: techProblems(f, f.home, "home"), away: techProblems(f, f.away, "away") };
       if (pr.home.length || pr.away.length) {
@@ -21581,7 +21622,7 @@ app.get("/api/club", needClub, (req, res) => {
       ...pubFx(f),
       lineup: db.lineups[f.id + ":" + req.tid] || null,
       auto: getLineup(f, req.tid),
-      techRisk: isTechDefeatEnabledForComp(f.comp) ? techProblems(f, req.tid).filter((x) => x !== "\u043D\u0435 \u043F\u043E\u0434\u0430\u043D \u0441\u043E\u0441\u0442\u0430\u0432 \u043D\u0430 \u043C\u0430\u0442\u0447") : [],
+      techRisk: isTechDefeatEnabledForFixture(f) ? techProblems(f, req.tid).filter((x) => x !== "\u043D\u0435 \u043F\u043E\u0434\u0430\u043D \u0441\u043E\u0441\u0442\u0430\u0432 \u043D\u0430 \u043C\u0430\u0442\u0447") : [],
       loanPool: loanMapped,
       ...(isAdmin ? { fatigueByPid } : {}),
       availByPid,
@@ -23767,7 +23808,7 @@ app.get("/api/admin/overview", admin, async (req, res) => {
     transferWindow: getTransferWindowState(),
     settings: {
       ...db.settings,
-      techDefeatComps: Array.isArray(db.settings.techDefeatComps) ? db.settings.techDefeatComps : getOfficialTechDefeatCompIds(),
+      techDefeatComps: normalizeTechDefeatCompsList(db.settings.techDefeatComps),
       keys: void 0,
       tgToken: tgToken() ? "\u2022\u2022\u2022\u2022" : "",
       hasTgToken: !!tgToken(),
