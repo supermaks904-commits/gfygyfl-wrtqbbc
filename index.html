@@ -7743,6 +7743,7 @@ async function pgClub(app) {
     <button data-t="friendly" class="${CT === 'friendly' ? 'on' : ''}">Товарищеские ${(c.friendly?.incoming?.length || 0) ? `(${c.friendly.incoming.length})` : ''}</button>
     <button data-t="transfers" class="${CT === 'transfers' ? 'on' : ''}">Трансферы ${((c.incomingTransfers?.length || 0) + (c.outgoingTransfers?.length || 0)) ? `(${c.incomingTransfers.length + c.outgoingTransfers.length})` : ''}</button>
     <button data-t="sponsors" class="${CT === 'sponsors' ? 'on' : ''}">💰 Спонсоры и РФС</button>
+    <button data-t="fines" class="${CT === 'fines' ? 'on' : ''}">⚖️ КДК и Фэйр-плэй${(c.finesSummary?.finesCount || 0) > 0 ? ` (${c.finesSummary.finesCount})` : ''}</button>
     <button data-t="finances" class="${CT === 'finances' ? 'on' : ''}">💰 Баланс</button>
   </div>
   <div id="cb"></div>`;
@@ -10935,6 +10936,12 @@ async function pgClub(app) {
     return;
   }
 
+  if (CT === 'fines') {
+    const fnExt = await ensureFines();
+    await fnExt.renderClubFinesTab(cb, c, () => pgClub(app));
+    return;
+  }
+
   if (CT === 'finances') {
     const fmtBal = v => (Number(v || 0) < 0 ? '-€' + Math.abs(Math.round(Number(v))).toLocaleString('ru-RU') : '€' + Math.round(Number(v || 0)).toLocaleString('ru-RU'));
     const history = Array.isArray(c.budgetHistory) ? c.budgetHistory : [];
@@ -12528,6 +12535,7 @@ async function pgAdmin(app) {
     ['friendly', `Товарищеские${ov.pendingFriendlyCount ? ' (' + ov.pendingFriendlyCount + ')' : ''}`],
     ['transfers', `Трансферы${ov.transfers.length ? ' (' + ov.transfers.length + ')' : ''}`],
     ['budget', 'Бюджет'],
+    ['fines', '⚖️ КДК и Фэйр-плэй'],
     ['ads', '📢 Реклама'],
     ['ai', '🧠 ИИ'],
     ['aiq', '🤖 Очередь ИИ'],
@@ -17213,6 +17221,10 @@ async function pgAdmin(app) {
     const ext = await ensureExt();
     await ext.renderAdminAdsTab(ab, ov, re);
   }
+  else if (AT === 'fines') {
+    const fnExt = await ensureFines();
+    await fnExt.renderAdminFinesTab(ab, ov, re);
+  }
   else if (AT === 'ai') {
     ab.innerHTML = '<div class="panel">Загрузка данных ИИ и ключей…</div>';
     const fmtNum = n => Number(n || 0).toLocaleString('ru-RU');
@@ -17545,7 +17557,7 @@ async function pgAdmin(app) {
     <label style="margin-top:10px">Адрес сайта (для ссылок в Telegram)</label><input id="url" value="${e(s.siteUrl)}" placeholder="https://mysite.ru"></div>
     <div class="panel"><h3>Игра</h3><div class="row"><div style="flex:1;min-width:200px"><label>Максимум игроков в заявке</label><input id="sqm" type="number" min="1" max="28" value="${Math.min(28, s.squadMax || 28)}"><div class="muted small" style="margin-top:2px">Максимум по регламенту: 28 игроков</div></div><div style="flex:1;min-width:200px"><label>Запросов на матч</label><select id="chk"><option value="2" ${s.chunks != 6 ? 'selected' : ''}>2 (по таймам)</option><option value="6" ${s.chunks == 6 ? 'selected' : ''}>6 (по 15 минут)</option></select></div></div>
     <label style="margin-top:8px"><input type="checkbox" id="auto" ${s.auto ? 'checked' : ''} style="width:auto"> Автозапуск матчей по расписанию</label>
-    <label style="margin-top:6px"><input type="checkbox" id="tdef" ${s.techDefeat ? 'checked' : ''} style="width:auto"> Авто-ТН (техническое поражение при неподанном составе или неполном штабе)</label></div>
+    <label style="margin-top:6px"><input type="checkbox" id="tdef" ${s.techDefeat ? 'checked' : ''} style="width:auto"> Авто-ТН (техническое поражение 0:3 при неподанном составе, неполном штабе или неоформленном выезде + штраф КДК за неявку)</label></div>
     <div class="panel"><h3>Системный промпт матча</h3><textarea id="sys" style="min-height:220px;font:13px/1.4 ui-monospace,Consolas,monospace">${e(s.systemPrompt)}</textarea></div>
     <div class="row"><button class="btn" id="ssv">Сохранить настройки</button></div>
     <div class="panel" style="margin-top:16px"><h3>Последние запросы к нейросети</h3><div class="wrap"><table><thead><tr><th class="l">Время</th><th class="l">Задача</th><th class="l">Провайдер</th><th>мс</th><th class="l">Результат</th></tr></thead><tbody>${ov.log.map(l => `<tr><td class="l">${new Date(l.ts).toLocaleTimeString('ru-RU')}</td><td class="l">${e(l.task)}</td><td class="l">${e(l.p)}</td><td>${l.ms}</td><td class="l small" style="white-space:normal">${l.ok ? 'ок' : e(l.err)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">Пока пусто</td></tr>'}</tbody></table></div></div>`;
@@ -20937,6 +20949,18 @@ function ensureLogistics() {
     check();
   });
 }
+function ensureFines() {
+  if (window.__RPL_FINES__) return Promise.resolve(window.__RPL_FINES__);
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = () => {
+      if (window.__RPL_FINES__) return resolve(window.__RPL_FINES__);
+      if (Date.now() - started > 10000) return reject(new Error('Модуль КДК и Фэйр-плэй не загрузился'));
+      setTimeout(check, 20);
+    };
+    check();
+  });
+}
 </script>
 <script>
 /* прячем подсказку «прокручивайте таблицу», если таблица и так помещается */
@@ -20957,6 +20981,7 @@ function ensureLogistics() {
 </script>
 <script type="module" src="/src/ads_predictions_client.ts"></script>
 <script type="module" src="/src/away_logistics_client.ts"></script>
+<script type="module" src="/src/fines_fairplay_client.ts"></script>
 <datalist id="nat_list"><option value="Россия"><option value="Беларусь"><option value="Казахстан"><option value="Армения"><option value="Киргизия"><option value="Украина"><option value="Грузия"><option value="Азербайджан"><option value="Узбекистан"><option value="Таджикистан"><option value="Молдова"><option value="Сербия"><option value="Хорватия"><option value="Черногория"><option value="Босния и Герцеговина"><option value="Словения"><option value="Болгария"><option value="Румыния"><option value="Польша"><option value="Чехия"><option value="Словакия"><option value="Венгрия"><option value="Греция"><option value="Турция"><option value="Германия"><option value="Франция"><option value="Испания"><option value="Португалия"><option value="Италия"><option value="Англия"><option value="Нидерланды"><option value="Бельгия"><option value="Швейцария"><option value="Австрия"><option value="Дания"><option value="Швеция"><option value="Норвегия"><option value="Финляндия"><option value="Бразилия"><option value="Аргентина"><option value="Колумбия"><option value="Уругвай"><option value="Эквадор"><option value="Чили"><option value="Парагвай"><option value="Венесуэла"><option value="Мексика"><option value="США"><option value="Нигерия"><option value="Гана"><option value="Камерун"><option value="Сенегал"><option value="Кот-д’Ивуар"><option value="Мали"><option value="Марокко"><option value="Алжир"><option value="Египет"><option value="Япония"><option value="Южная Корея"><option value="Иран"><option value="Ирак"><option value="Австралия"></datalist>
 <datalist id="nat_opp_main_list"><option value="Россия U21"><option value="Беларусь"><option value="Казахстан"><option value="Армения"><option value="Киргизия"><option value="Грузия"><option value="Азербайджан"><option value="Узбекистан"><option value="Таджикистан"><option value="Молдова"><option value="Сербия"><option value="Хорватия"><option value="Черногория"><option value="Босния и Герцеговина"><option value="Словения"><option value="Болгария"><option value="Румыния"><option value="Польша"><option value="Чехия"><option value="Словакия"><option value="Венгрия"><option value="Греция"><option value="Турция"><option value="Германия"><option value="Франция"><option value="Испания"><option value="Португалия"><option value="Италия"><option value="Англия"><option value="Нидерланды"><option value="Бельгия"><option value="Швейцария"><option value="Австрия"><option value="Дания"><option value="Швеция"><option value="Норвегия"><option value="Финляндия"><option value="Бразилия"><option value="Аргентина"><option value="Колумбия"><option value="Уругвай"><option value="Эквадор"><option value="Чили"><option value="Парагвай"><option value="Венесуэла"><option value="Мексика"><option value="США"><option value="Нигерия"><option value="Гана"><option value="Камерун"><option value="Сенегал"><option value="Кот-д’Ивуар"><option value="Мали"><option value="Марокко"><option value="Алжир"><option value="Египет"><option value="Япония"><option value="Южная Корея"><option value="Иран"><option value="Ирак"><option value="Австралия"></datalist>
 <datalist id="nat_opp_u21_list"><option value="Россия"><option value="Беларусь U21"><option value="Сербия U21"><option value="Казахстан U21"><option value="Узбекистан U21"><option value="Армения U21"><option value="Азербайджан U21"><option value="Турция U21"><option value="Бразилия U21"><option value="Аргентина U21"><option value="Беларусь"><option value="Казахстан"><option value="Армения"><option value="Киргизия"><option value="Грузия"><option value="Азербайджан"><option value="Узбекистан"><option value="Таджикистан"><option value="Молдова"><option value="Сербия"><option value="Хорватия"><option value="Черногория"><option value="Босния и Герцеговина"><option value="Словения"><option value="Болгария"><option value="Румыния"><option value="Польша"><option value="Чехия"><option value="Словакия"><option value="Венгрия"><option value="Греция"><option value="Турция"><option value="Бразилия"><option value="Аргентина"><option value="Иран"><option value="Египет"></datalist>

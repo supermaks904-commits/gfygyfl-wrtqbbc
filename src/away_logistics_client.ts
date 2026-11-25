@@ -485,7 +485,7 @@ async function renderClubLogisticsTab(
         ? `<span class="log-status-inc">Накладка · ${item.saved.readinessScore}%</span>`
         : item.organized
           ? `<span class="log-status-ok">Готовность ${item.saved.readinessScore}%</span>`
-          : `<span class="log-status-warn">Не оформлен</span>`;
+          : `<span class="log-status-warn">Не оформлен · риск ТН 0:3 и штрафа</span>`;
       const corridorNote = !item.catalog?.destAirport
         ? "Аэропорт закрыт"
         : skyLvl === "high"

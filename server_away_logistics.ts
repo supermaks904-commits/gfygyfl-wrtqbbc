@@ -1236,7 +1236,7 @@ export function getClubAwayFixturesSummary(ctx: AwayLogisticsServerContext, tid:
         destStadium: geo.destStadium,
         oppName: ctx.tn(oppId),
         readinessScore: rec?.readinessScore ?? (geo.distKm < 70 ? 64 : 46),
-        summaryLine: rec?.summaryLine || "Выезд не организован (риск аврала)",
+        summaryLine: rec?.summaryLine || (db.settings?.techDefeat ? "Выезд не организован — неявка, ТН 0:3 и штраф КДК" : "Выезд не организован (риск ТН 0:3 и штрафа при Авто-ТН)"),
         hasUnresolvedIncident: !!(rec?.incident && !rec.incident.resolved),
       };
     })

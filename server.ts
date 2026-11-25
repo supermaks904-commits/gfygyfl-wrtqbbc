@@ -103,9 +103,17 @@ import {
 import {
   getAwayLogisticsMatchImpact,
   getClubAwayFixturesSummary,
+  isAwayOrTravelFixture,
   registerAwayLogisticsRoutes,
   type AwayLogisticsServerContext,
 } from "./server_away_logistics.ts";
+import {
+  applyNoShowTechDefeatFine,
+  getClubFinesSummary,
+  processMatchFinesAndFairPlay,
+  registerFinesFairPlayRoutes,
+  type FinesFairPlayContext,
+} from "./server_fines_fairplay.ts";
 
 // src/logos.ts
 var OFFICIAL_SERVER_LOGOS = {
@@ -6845,7 +6853,10 @@ function seed() {
     clubNotifications: [],
     clubWatchlist: [],
     clubCoachWatchlist: [],
-    awayLogistics: {}
+    awayLogistics: {},
+    clubFines: [],
+    clubFairPlayAdjustments: [],
+    clubFinesProcessed: {}
   };
   for (const [name, city, lat, lon, stadium] of RPL) {
     d.teams.push({ id: uid(), name, comp: "rpl", city, lat, lon, stadium, code: mkCode(), logo: getTeamLogo(name, null, "rpl") });
@@ -7910,6 +7921,11 @@ function load() {
   }
   if (!db.awayLogistics || typeof db.awayLogistics !== "object" || Array.isArray(db.awayLogistics)) {
     db.awayLogistics = {};
+  }
+  if (!Array.isArray(db.clubFines)) db.clubFines = [];
+  if (!Array.isArray(db.clubFairPlayAdjustments)) db.clubFairPlayAdjustments = [];
+  if (!db.clubFinesProcessed || typeof db.clubFinesProcessed !== "object" || Array.isArray(db.clubFinesProcessed)) {
+    db.clubFinesProcessed = {};
   }
   delete db.insiderPosts;
   delete db.eskCases;
@@ -14324,6 +14340,10 @@ function techProblems(f, tid, side?: "home" | "away") {
   const miss = REQUIRED_STAFF_ROLES.filter((r) => !hasStaffRole(tid, r));
   if (miss.length) out.push(`\u043D\u0435 \u0443\u043A\u043E\u043C\u043F\u043B\u0435\u043A\u0442\u043E\u0432\u0430\u043D \u0442\u0440\u0435\u043D\u0435\u0440\u0441\u043A\u0438\u0439 \u0448\u0442\u0430\u0431 (\u043D\u0435\u0442: ${miss.map((r) => STAFF_ROLES[r]?.title || r).join(", ")})`);
   if (!db.lineups[lineupKey(f, tid, side)]) out.push("\u043D\u0435 \u043F\u043E\u0434\u0430\u043D \u0441\u043E\u0441\u0442\u0430\u0432 \u043D\u0430 \u043C\u0430\u0442\u0447");
+  const travelCheck = isAwayOrTravelFixture(getLogisticsCtx(), f, tid);
+  if (travelCheck.needsTravel && !db.awayLogistics?.[`${f.id}:${tid}`]?.confirmedAt) {
+    out.push("не организован выезд на матч (неявка команды)");
+  }
   return out;
 }
 function applyTechDefeat(f, pr) {
@@ -14344,8 +14364,17 @@ function applyTechDefeat(f, pr) {
   f.err = "";
   f.genProgress = null;
   const hName = sideDisplayName(f, "home"), aName = sideDisplayName(f, "away");
+  const fineNotes: string[] = [];
+  if (hb && f.home) {
+    const fnRes = applyNoShowTechDefeatFine(getFinesCtx(), f, f.home, pr.home);
+    if (fnRes.amount > 0) fineNotes.push(`штраф КДК для «${hName}»: €${fnRes.amount.toLocaleString("ru-RU")}`);
+  }
+  if (ab && f.away) {
+    const fnRes = applyNoShowTechDefeatFine(getFinesCtx(), f, f.away, pr.away);
+    if (fnRes.amount > 0) fineNotes.push(`штраф КДК для «${aName}»: €${fnRes.amount.toLocaleString("ru-RU")}`);
+  }
   const why = (n, r) => `${n}: ${r.join(", ")}`;
-  f.note = "\u0422\u0435\u0445\u043D\u0438\u0447\u0435\u0441\u043A\u043E\u0435 \u043F\u043E\u0440\u0430\u0436\u0435\u043D\u0438\u0435. " + [hb ? why(hName, pr.home) : "", ab ? why(aName, pr.away) : ""].filter(Boolean).join(" \xB7 ");
+  f.note = "\u0422\u0435\u0445\u043D\u0438\u0447\u0435\u0441\u043A\u043E\u0435 \u043F\u043E\u0440\u0430\u0436\u0435\u043D\u0438\u0435. " + [hb ? why(hName, pr.home) : "", ab ? why(aName, pr.away) : ""].filter(Boolean).join(" \xB7 ") + (fineNotes.length ? ` (${fineNotes.join("; ")})` : "");
   f.status = "done";
   if (!both) checkPlayoffShootout(f);
   settlePredictionsForFixture(getAdsCtx(), f);
@@ -14353,7 +14382,7 @@ function applyTechDefeat(f, pr) {
   advanceCup();
   save();
   try {
-    tg(`\u26A0\uFE0F <b>\u0422\u0435\u0445\u043D\u0438\u0447\u0435\u0441\u043A\u043E\u0435 \u043F\u043E\u0440\u0430\u0436\u0435\u043D\u0438\u0435</b>
+    tg(`\u26A0\uFE0F <b>\u0422\u0435\u0445\u043D\u0438\u0447\u0435\u0441\u043A\u043E\u0435 \u043F\u043E\u0440\u0430\u0436\u0435\u043D\u0438\u0435 (${f.hg}:${f.ag})</b>
 ${esc(hName)} \u2014 ${esc(aName)}
 ${esc(f.note)}`);
   } catch {
@@ -14852,6 +14881,7 @@ async function finish(id) {
   }
   settlePredictionsForFixture(getAdsCtx(), f);
   updateRefereeStats(f, m.events, m);
+  processMatchFinesAndFairPlay(getFinesCtx(), f, m);
   if (f.comp === "cup") advanceCup();
   const isFriendlyMatch = f.comp === FRIENDLY_COMP;
   const matchComp = normDiscComp(f.comp);
@@ -21692,7 +21722,8 @@ app.get("/api/club", needClub, (req, res) => {
     transferCooldown: getTransferCooldownSummary(db, "club:" + req.tid),
     sponsors: buildSponsorSummary(getAdsCtx(), req.tid),
     ownerProfile: ensureOwnerProfile(getAdsCtx(), "club:" + req.tid),
-    awayLogistics: getClubAwayFixturesSummary(getLogisticsCtx(), req.tid)
+    awayLogistics: getClubAwayFixturesSummary(getLogisticsCtx(), req.tid),
+    finesSummary: getClubFinesSummary(getFinesCtx(), req.tid)
   });
 });
 function enrichClubWatchlist(teamId: string) {
@@ -29537,6 +29568,25 @@ function getLogisticsCtx(): AwayLogisticsServerContext {
   };
 }
 registerAwayLogisticsRoutes(app, getLogisticsCtx());
+function getFinesCtx(): FinesFairPlayContext {
+  return {
+    getDb: () => db,
+    save,
+    S,
+    team,
+    tn,
+    teamLogo,
+    fx,
+    compName: (id: string) => db.comps?.find((c: any) => c.id === id)?.name || id,
+    admin,
+    needClub,
+    fail,
+    uid,
+    tg,
+    esc,
+  };
+}
+registerFinesFairPlayRoutes(app, getFinesCtx());
 async function startServer() {
   if (process.env.NODE_ENV === "production" && fs3.existsSync(path3.join(__dirname, "dist"))) {
     app.use(express.static(path3.join(__dirname, "dist")));
