@@ -1227,6 +1227,12 @@ export function getClubAwayFixturesSummary(ctx: AwayLogisticsServerContext, tid:
       const key = `${f.id}:${tid}`;
       const rec: AwayLogisticsRecord | null = db.awayLogistics[key] || null;
       const oppId = f.home === tid ? f.away : f.home;
+      const tdForComp =
+        db.settings?.techDefeat === true &&
+        String(f.comp || "") !== "friendly_match" &&
+        (!Array.isArray(db.settings?.techDefeatComps) ||
+          db.settings.techDefeatComps.includes(String(f.comp || "")) ||
+          (f.comp === "playoff_rpl_fnl" && db.settings.techDefeatComps.includes("playoff")));
       return {
         fixtureId: f.id,
         role: geo.role,
@@ -1236,7 +1242,7 @@ export function getClubAwayFixturesSummary(ctx: AwayLogisticsServerContext, tid:
         destStadium: geo.destStadium,
         oppName: ctx.tn(oppId),
         readinessScore: rec?.readinessScore ?? (geo.distKm < 70 ? 64 : 46),
-        summaryLine: rec?.summaryLine || (db.settings?.techDefeat ? "Выезд не организован — неявка, ТН 0:3 и штраф КДК" : "Выезд не организован (риск ТН 0:3 и штрафа при Авто-ТН)"),
+        summaryLine: rec?.summaryLine || (tdForComp ? "Выезд не организован — неявка, ТН 0:3 и штраф КДК" : "Выезд не организован (для этой лиги Авто-ТН выключен)"),
         hasUnresolvedIncident: !!(rec?.incident && !rec.incident.resolved),
       };
     })

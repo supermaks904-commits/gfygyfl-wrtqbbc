@@ -17557,7 +17557,30 @@ async function pgAdmin(app) {
     <label style="margin-top:10px">Адрес сайта (для ссылок в Telegram)</label><input id="url" value="${e(s.siteUrl)}" placeholder="https://mysite.ru"></div>
     <div class="panel"><h3>Игра</h3><div class="row"><div style="flex:1;min-width:200px"><label>Максимум игроков в заявке</label><input id="sqm" type="number" min="1" max="28" value="${Math.min(28, s.squadMax || 28)}"><div class="muted small" style="margin-top:2px">Максимум по регламенту: 28 игроков</div></div><div style="flex:1;min-width:200px"><label>Запросов на матч</label><select id="chk"><option value="2" ${s.chunks != 6 ? 'selected' : ''}>2 (по таймам)</option><option value="6" ${s.chunks == 6 ? 'selected' : ''}>6 (по 15 минут)</option></select></div></div>
     <label style="margin-top:8px"><input type="checkbox" id="auto" ${s.auto ? 'checked' : ''} style="width:auto"> Автозапуск матчей по расписанию</label>
-    <label style="margin-top:6px"><input type="checkbox" id="tdef" ${s.techDefeat ? 'checked' : ''} style="width:auto"> Авто-ТН (техническое поражение 0:3 при неподанном составе, неполном штабе или неоформленном выезде + штраф КДК за неявку)</label></div>
+    <label style="margin-top:6px"><input type="checkbox" id="tdef" ${s.techDefeat ? 'checked' : ''} style="width:auto"> Авто-ТН (техническое поражение 0:3 при неподанном составе, неполном штабе или неоформленном выезде + штраф КДК за неявку)</label>
+    ${(() => {
+      const tdComps = (ov.comps && ov.comps.length ? ov.comps : (S.st?.comps || []).filter(c => c && c.id && c.id !== 'friendly_match' && c.type !== 'friendly' && c.type !== 'abroad'));
+      const selComps = Array.isArray(s.techDefeatComps) ? s.techDefeatComps : tdComps.map(c => c.id);
+      return `<div id="tdef_comps_box" style="margin:10px 0 4px 22px;padding:12px 14px;border:1px solid var(--bd);border-radius:10px;background:var(--bg2,#f8fafc);${s.techDefeat ? '' : 'opacity:0.55;'}">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <div>
+            <b style="font-size:13px">Лиги и турниры с Авто-ТН</b>
+            <div class="muted small">Выберите соревнования, в которых срабатывает автоматическое техническое поражение 0:3 (товарищеские матчи исключены всегда).</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button type="button" class="btn alt sm" id="tdef_all">Выбрать все</button>
+            <button type="button" class="btn alt sm" id="tdef_pro">РПЛ + Кубок + ФНЛ</button>
+            <button type="button" class="btn alt sm" id="tdef_none">Снять все</button>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px 12px">
+          ${tdComps.map(c => `<label style="display:flex;align-items:flex-start;gap:7px;margin:0;padding:5px 7px;border-radius:7px;background:var(--card,#fff);border:1px solid var(--bd);cursor:pointer;font-size:12.5px">
+            <input type="checkbox" class="tdef-comp" value="${e(c.id)}" ${selComps.includes(c.id) ? 'checked' : ''} style="width:auto;margin-top:2px">
+            <span><b>${e(c.name)}</b>${c.level ? `<br><span class="muted small">${e(c.level)}</span>` : ''}</span>
+          </label>`).join('')}
+        </div>
+      </div>`;
+    })()}</div>
     <div class="panel"><h3>Системный промпт матча</h3><textarea id="sys" style="min-height:220px;font:13px/1.4 ui-monospace,Consolas,monospace">${e(s.systemPrompt)}</textarea></div>
     <div class="row"><button class="btn" id="ssv">Сохранить настройки</button></div>
     <div class="panel" style="margin-top:16px"><h3>Последние запросы к нейросети</h3><div class="wrap"><table><thead><tr><th class="l">Время</th><th class="l">Задача</th><th class="l">Провайдер</th><th>мс</th><th class="l">Результат</th></tr></thead><tbody>${ov.log.map(l => `<tr><td class="l">${new Date(l.ts).toLocaleTimeString('ru-RU')}</td><td class="l">${e(l.task)}</td><td class="l">${e(l.p)}</td><td>${l.ms}</td><td class="l small" style="white-space:normal">${l.ok ? 'ок' : e(l.err)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">Пока пусто</td></tr>'}</tbody></table></div></div>`;
@@ -17670,6 +17693,20 @@ async function pgAdmin(app) {
       };
     }
 
+    const tdefChk = $('#tdef');
+    const tdefBox = $('#tdef_comps_box');
+    if (tdefChk && tdefBox) {
+      tdefChk.onchange = () => {
+        tdefBox.style.opacity = tdefChk.checked ? '1' : '0.55';
+      };
+    }
+    if ($('#tdef_all')) $('#tdef_all').onclick = () => ab.querySelectorAll('.tdef-comp').forEach(x => { x.checked = true; });
+    if ($('#tdef_none')) $('#tdef_none').onclick = () => ab.querySelectorAll('.tdef-comp').forEach(x => { x.checked = false; });
+    if ($('#tdef_pro')) $('#tdef_pro').onclick = () => {
+      const pro = new Set(['rpl', 'supercup', 'cup', 'playoff', 'fnl']);
+      ab.querySelectorAll('.tdef-comp').forEach(x => { x.checked = pro.has(x.value); });
+    };
+
     $('#ssv').onclick = async () => {
       const keys = {}, models = {};
       for (const n of ['gemini', 'mistral', 'openrouter']) {
@@ -17679,7 +17716,8 @@ async function pgAdmin(app) {
       }
       if ($('#m_mistralFallback')) models.mistralFallback = $('#m_mistralFallback').value;
       const clearDbEl = $('#s_clear_database_url');
-      const r = await act(() => api('/admin/settings', { keys, models, databaseUrl: $('#s_database_url')?.value || '', clearDatabaseUrl: !!(clearDbEl && clearDbEl.checked), workerUrl: $('#s_worker_url').value.trim(), workerSecret: $('#s_worker_secret').value, grounding: $('#gr').checked, secPerMin: $('#spm').value, breakSec: $('#brk').value, tgToken: $('#tgt').value, tgChat: $('#tgc').value, siteUrl: $('#url').value, squadMax: $('#sqm').value, chunks: $('#chk').value, auto: $('#auto').checked, techDefeat: $('#tdef').checked, systemPrompt: $('#sys').value }), r => {
+      const techDefeatComps = Array.from(ab.querySelectorAll('.tdef-comp:checked')).map(x => x.value);
+      const r = await act(() => api('/admin/settings', { keys, models, databaseUrl: $('#s_database_url')?.value || '', clearDatabaseUrl: !!(clearDbEl && clearDbEl.checked), workerUrl: $('#s_worker_url').value.trim(), workerSecret: $('#s_worker_secret').value, grounding: $('#gr').checked, secPerMin: $('#spm').value, breakSec: $('#brk').value, tgToken: $('#tgt').value, tgChat: $('#tgc').value, siteUrl: $('#url').value, squadMax: $('#sqm').value, chunks: $('#chk').value, auto: $('#auto').checked, techDefeat: $('#tdef').checked, techDefeatComps, systemPrompt: $('#sys').value }), r => {
         if (r?.databaseUrlChanged) {
           if (r.pgActive) return 'Настройки сохранены · PostgreSQL подключён!';
           if (r.pgError) return 'Настройки сохранены · PostgreSQL недоступен: ' + r.pgError;

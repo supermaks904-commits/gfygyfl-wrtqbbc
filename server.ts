@@ -6818,6 +6818,7 @@ function seed() {
       chunks: 2,
       auto: true,
       techDefeat: false,
+      techDefeatComps: ["rpl", "supercup", "cup", "playoff", "fnl", "2la_gold", "2la_silver", "2lb_1", "2lb_2", "2lb_3", "2lb_4", "media", "media_div2", "media_cup"],
       squadMax: 28,
       grounding: false,
       tgToken: "",
@@ -7907,6 +7908,9 @@ function load() {
   const def = seed();
   for (const k of Object.keys(def.settings)) {
     if (db.settings[k] === void 0) db.settings[k] = def.settings[k];
+  }
+  if (!Array.isArray(db.settings.techDefeatComps)) {
+    db.settings.techDefeatComps = def.settings.techDefeatComps.slice();
   }
   if (db.settings.squadMax === 25) db.settings.squadMax = 28;
   if (!db.settings.transferWindow || typeof db.settings.transferWindow !== "object") {
@@ -14325,6 +14329,23 @@ function hasStaffRole(tid, role) {
   if (getStaffForTeam(tid).some((x) => x.role === role)) return true;
   return role === "head" && !!(db.coaches && !Array.isArray(db.coaches) && db.coaches[tid]);
 }
+function getOfficialTechDefeatComps() {
+  const list = (Array.isArray(db?.comps) && db.comps.length ? db.comps : COMPS)
+    .filter((c) => c && c.id && c.id !== FRIENDLY_COMP && c.type !== "friendly" && c.type !== "abroad")
+    .map((c) => ({ id: String(c.id), name: String(c.name || c.id), type: String(c.type || "league"), level: String(c.level || "") }));
+  return list;
+}
+function getOfficialTechDefeatCompIds() {
+  return getOfficialTechDefeatComps().map((c) => c.id);
+}
+function isTechDefeatEnabledForComp(compId?: string | null) {
+  if (db?.settings?.techDefeat !== true) return false;
+  const raw = String(compId || "").trim();
+  if (!raw || raw === FRIENDLY_COMP || raw === "friendly" || raw === "europe" || raw === "national") return false;
+  const norm = raw === "playoff_rpl_fnl" ? "playoff" : raw;
+  if (!Array.isArray(db.settings.techDefeatComps)) return true;
+  return db.settings.techDefeatComps.includes(norm) || db.settings.techDefeatComps.includes(raw);
+}
 function techProblems(f, tid, side?: "home" | "away") {
   const out = [];
   if (!tid || !team(tid)) return out;
@@ -14406,7 +14427,7 @@ function enqueue(id, force = false, manual = true) {
   if (!f || f.status !== "scheduled") return;
   if (isOwnedByOtherInstance(f)) return;
   if (queue.some((j) => j.id === id)) return;
-  if (!force && db.settings.techDefeat === true && f.comp !== FRIENDLY_COMP) {
+  if (!force && isTechDefeatEnabledForComp(f.comp)) {
     if (manual || Date.now() >= realAt(f).getTime()) {
       const pr = { home: techProblems(f, f.home, "home"), away: techProblems(f, f.away, "away") };
       if (pr.home.length || pr.away.length) {
@@ -21560,7 +21581,7 @@ app.get("/api/club", needClub, (req, res) => {
       ...pubFx(f),
       lineup: db.lineups[f.id + ":" + req.tid] || null,
       auto: getLineup(f, req.tid),
-      techRisk: techProblems(f, req.tid).filter((x) => x !== "\u043D\u0435 \u043F\u043E\u0434\u0430\u043D \u0441\u043E\u0441\u0442\u0430\u0432 \u043D\u0430 \u043C\u0430\u0442\u0447"),
+      techRisk: isTechDefeatEnabledForComp(f.comp) ? techProblems(f, req.tid).filter((x) => x !== "\u043D\u0435 \u043F\u043E\u0434\u0430\u043D \u0441\u043E\u0441\u0442\u0430\u0432 \u043D\u0430 \u043C\u0430\u0442\u0447") : [],
       loanPool: loanMapped,
       ...(isAdmin ? { fatigueByPid } : {}),
       availByPid,
@@ -23742,9 +23763,11 @@ app.get("/api/admin/overview", admin, async (req, res) => {
     })),
     foreignClubPresets: FOREIGN_CLUBS.map((c) => ({ id: c.id, name: c.name, country: c.country, league: c.league, flag: c.flag })),
     abroadPoolNames: [...new Set((db.players || []).map((p) => String(p.abroadClub || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru")),
+    comps: getOfficialTechDefeatComps(),
     transferWindow: getTransferWindowState(),
     settings: {
       ...db.settings,
+      techDefeatComps: Array.isArray(db.settings.techDefeatComps) ? db.settings.techDefeatComps : getOfficialTechDefeatCompIds(),
       keys: void 0,
       tgToken: tgToken() ? "\u2022\u2022\u2022\u2022" : "",
       hasTgToken: !!tgToken(),
@@ -24057,6 +24080,9 @@ app.post("/api/admin/settings", admin, async (req, res) => {
   if (b.chunks !== void 0) s.chunks = +b.chunks === 6 ? 6 : 2;
   if (b.auto !== void 0) s.auto = !!b.auto;
   if (b.techDefeat !== void 0) s.techDefeat = !!b.techDefeat;
+  if (Array.isArray(b.techDefeatComps)) {
+    s.techDefeatComps = [...new Set(b.techDefeatComps.map((x) => String(x || "").trim()).filter((x) => x && x !== FRIENDLY_COMP && x !== "europe"))];
+  }
   if (b.grounding !== void 0) s.grounding = !!b.grounding;
   if (b.adsgramBlocks && typeof b.adsgramBlocks === "object") {
     s.adsgramBlocks ||= {};
